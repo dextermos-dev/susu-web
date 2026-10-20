@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseEnv } from './env';
 
 /** Builds a minimal valid environment, of the shape a real .env would produce. */
@@ -83,5 +83,94 @@ describe('parseEnv', () => {
     } catch (error) {
       expect(String(error)).not.toContain('super-secret-value');
     }
+  });
+
+  describe('production HTTPS enforcement', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    const protectedUrls = [
+      'VITE_APP_URL',
+      'VITE_SUPABASE_URL',
+      'VITE_STELLAR_RPC_URL',
+      'VITE_API_BASE_URL',
+    ] as const;
+
+    it('rejects an http:// value for each protected URL in production', () => {
+      vi.stubEnv('PROD', true);
+      for (const key of protectedUrls) {
+        expect(
+          () =>
+            parseEnv(
+              validEnv({
+                VITE_APP_URL: 'https://app.susu.money',
+                VITE_SUPABASE_URL: 'https://example.supabase.co',
+                VITE_STELLAR_RPC_URL: 'https://soroban-testnet.stellar.org',
+                VITE_API_BASE_URL: 'https://api.susu.money',
+                [key]: 'http://insecure.example.com',
+              }),
+            ),
+          `expected ${key} with http:// to be rejected in production`,
+        ).toThrow(/must use https in production/);
+      }
+    });
+
+    it('rejects http://localhost in production', () => {
+      vi.stubEnv('PROD', true);
+      expect(() =>
+        parseEnv(
+          validEnv({
+            VITE_APP_URL: 'http://localhost:5173',
+            VITE_SUPABASE_URL: 'https://example.supabase.co',
+            VITE_STELLAR_RPC_URL: 'https://soroban-testnet.stellar.org',
+            VITE_API_BASE_URL: 'https://api.susu.money',
+          }),
+        ),
+      ).toThrow(/must use https in production/);
+    });
+
+    it('accepts https:// values for all protected URLs in production', () => {
+      vi.stubEnv('PROD', true);
+      const env = parseEnv(
+        validEnv({
+          VITE_APP_URL: 'https://app.susu.money',
+          VITE_SUPABASE_URL: 'https://example.supabase.co',
+          VITE_STELLAR_RPC_URL: 'https://soroban-testnet.stellar.org',
+          VITE_API_BASE_URL: 'https://api.susu.money',
+        }),
+      );
+      expect(env.VITE_APP_URL).toBe('https://app.susu.money');
+      expect(env.VITE_SUPABASE_URL).toBe('https://example.supabase.co');
+      expect(env.VITE_STELLAR_RPC_URL).toBe('https://soroban-testnet.stellar.org');
+      expect(env.VITE_API_BASE_URL).toBe('https://api.susu.money');
+    });
+
+    it('still allows http://localhost and loopback IP addresses in development', () => {
+      vi.stubEnv('PROD', false);
+      const env = parseEnv(
+        validEnv({
+          VITE_APP_URL: 'http://localhost:5173',
+          VITE_SUPABASE_URL: 'http://127.0.0.1:54321',
+          VITE_STELLAR_RPC_URL: 'http://[::1]:8000',
+          VITE_API_BASE_URL: 'http://localhost:3000',
+        }),
+      );
+      expect(env.VITE_APP_URL).toBe('http://localhost:5173');
+      expect(env.VITE_SUPABASE_URL).toBe('http://127.0.0.1:54321');
+      expect(env.VITE_STELLAR_RPC_URL).toBe('http://[::1]:8000');
+      expect(env.VITE_API_BASE_URL).toBe('http://localhost:3000');
+    });
+
+    it('rejects insecure non-loopback http:// in development', () => {
+      vi.stubEnv('PROD', false);
+      expect(() =>
+        parseEnv(
+          validEnv({
+            VITE_SUPABASE_URL: 'http://external-insecure.com',
+          }),
+        ),
+      ).toThrow(/must use https in production/);
+    });
   });
 });
