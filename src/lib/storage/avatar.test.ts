@@ -25,6 +25,7 @@ const {
   prepareAvatar,
   randomHex,
   removeAvatar,
+  replaceAvatar,
   sniffImageKind,
   uploadAvatar,
 } = await import('./avatar');
@@ -403,5 +404,94 @@ describe('avatarProblemMessage', () => {
       expect(message.length).toBeGreaterThan(0);
       expect(message.endsWith('.')).toBe(true);
     }
+  });
+});
+
+describe('replaceAvatar', () => {
+  const OLD_PATH = `users/${USER}/avatar/${'a'.repeat(32)}.webp`;
+
+  async function replaceWith(
+    write: (path: string) => Promise<unknown>,
+    current: string | null = OLD_PATH,
+  ) {
+    stubDom();
+    uploadMock.mockResolvedValue({ error: null });
+    removeMock.mockResolvedValue({ error: null });
+    return replaceAvatar(USER, imageBlob('png'), current, write);
+  }
+
+  it('on a failed write removes the just-uploaded object and rethrows', async () => {
+    const writeError = new Error('PATCH /me failed');
+    const write = vi.fn().mockRejectedValue(writeError);
+
+    await expect(replaceWith(write)).rejects.toBe(writeError);
+
+    // The new object is gone; the old one is untouched because the profile
+    // still points at it.
+    expect(removeMock).toHaveBeenCalledTimes(1);
+    const [removed] = removeMock.mock.calls[0] as [string[]];
+    expect(removed).toHaveLength(1);
+    expect(removed[0]).not.toBe(OLD_PATH);
+    expect(isAvatarPathFor(removed[0] as string, USER)).toBe(true);
+  });
+
+  it('on success removes the replaced object and returns the new path', async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+
+    const result = await replaceWith(write);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(isAvatarPathFor(result.value.path, USER)).toBe(true);
+
+    // Exactly one removal: the old photo. The new one stays.
+    expect(removeMock).toHaveBeenCalledTimes(1);
+    expect(removeMock).toHaveBeenCalledWith([OLD_PATH]);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write.mock.calls[0]?.[0]).toBe(result.value.path);
+  });
+
+  it('with no previous photo removes nothing on success', async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+
+    const result = await replaceWith(write, null);
+
+    expect(result.ok).toBe(true);
+    expect(removeMock).not.toHaveBeenCalled();
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it('with empty string previous photo removes nothing on success', async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+
+    const result = await replaceWith(write, '');
+
+    expect(result.ok).toBe(true);
+    expect(removeMock).not.toHaveBeenCalled();
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the write error even if cleanup removal fails', async () => {
+    const writeError = new Error('PATCH /me failed');
+    const write = vi.fn().mockRejectedValue(writeError);
+
+    stubDom();
+    uploadMock.mockResolvedValue({ error: null });
+    removeMock.mockRejectedValue(new Error('Storage S3 timeout'));
+
+    await expect(replaceAvatar(USER, imageBlob('png'), OLD_PATH, write)).rejects.toBe(writeError);
+    expect(removeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an upload failure as a value without writing or removing', async () => {
+    stubDom();
+    uploadMock.mockResolvedValue({ error: { message: 'policy denied' } });
+    const write = vi.fn();
+
+    const result = await replaceAvatar(USER, imageBlob('png'), OLD_PATH, write);
+
+    expect(result).toEqual({ ok: false, problem: 'upload-failed' });
+    expect(write).not.toHaveBeenCalled();
+    expect(removeMock).not.toHaveBeenCalled();
   });
 });

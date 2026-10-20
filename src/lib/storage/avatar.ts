@@ -303,6 +303,53 @@ export async function removeAvatar(path: string): Promise<AvatarOutcome<undefine
 }
 
 /**
+ * Replaces a user's photo: uploads the new object, writes its path using the
+ * provided write callback, and removes the object that was replaced.
+ *
+ * If the write fails, the newly uploaded object is removed so it does not
+ * become an orphan, and the original error is rethrown. If there was no
+ * previous photo (or if it matched the new path), nothing is removed on success.
+ *
+ * Note: the three steps are not atomic. Callers must not invoke this
+ * concurrently for the same user.
+ */
+export async function replaceAvatar(
+  userId: string,
+  file: Blob,
+  current: string | null,
+  write: (path: string) => Promise<unknown>,
+): Promise<AvatarOutcome<{ path: string }>> {
+  const uploaded = await uploadAvatar(userId, file);
+  if (!uploaded.ok) return uploaded;
+
+  const { path } = uploaded.value;
+
+  try {
+    await write(path);
+  } catch (error) {
+    // The profile write failed: remove what was just uploaded so it does not
+    // orphan. A cleanup failure must not swallow the original error.
+    try {
+      await removeAvatar(path);
+    } catch {
+      // Best-effort cleanup
+    }
+    throw error;
+  }
+
+  // The profile was updated: remove the superseded object.
+  if (current !== null && current !== '' && current !== path) {
+    try {
+      await removeAvatar(current);
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+
+  return { ok: true, value: { path } };
+}
+
+/**
  * A short-lived URL for one photo.
  *
  * The bucket is private and its select policy is owner-scoped, so this is the
