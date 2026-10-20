@@ -142,6 +142,54 @@ describe('apiRequest', () => {
     await expect(apiRequest('groups')).rejects.toBe(abort);
   });
 
+  it('rejects a request that exceeds its timeout with a distinct retryable error', async () => {
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          const abort = () => reject(new DOMException('aborted', 'AbortError'));
+          if (init.signal?.aborted) abort();
+          else init.signal?.addEventListener('abort', abort, { once: true });
+        }),
+    );
+
+    const call = apiRequest('groups', { timeoutMs: 15 });
+    await expect(call).rejects.toBeInstanceOf(ApiError);
+    await expect(call).rejects.toMatchObject({
+      status: 0,
+      code: 'timeout',
+    });
+    const error = await call.catch((e: unknown) => e);
+    expect(isRetryableApiError(error)).toBe(true);
+    expect(apiErrorMessage(error)).toBe('The server took too long to respond. Try again.');
+  });
+
+  it('propagates a caller abort unchanged rather than reporting a timeout', async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          const abort = () => reject(new DOMException('aborted', 'AbortError'));
+          if (init.signal?.aborted) abort();
+          else init.signal?.addEventListener('abort', abort, { once: true });
+        }),
+    );
+
+    const pending = apiRequest('groups', { signal: controller.signal, timeoutMs: 10_000 });
+    controller.abort();
+
+    const error = await pending.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DOMException);
+    expect((error as DOMException).name).toBe('AbortError');
+    expect(error).not.toBeInstanceOf(ApiError);
+  });
+
+  it('clears the timeout when the request completes successfully', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { data: { ok: true } }));
+
+    const res = await apiRequest('groups', { timeoutMs: 5_000 });
+    expect(res).toEqual({ ok: true });
+  });
+
   it('refuses a 2xx that is not the documented envelope', async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { unexpected: true }));
 

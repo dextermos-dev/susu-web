@@ -49,6 +49,7 @@ export function isRetryableApiError(error: unknown): boolean {
 }
 
 const MESSAGES: Record<string, string> = {
+  timeout: 'The server took too long to respond. Try again.',
   invalid_request: 'That request was not something the server could accept.',
   unauthorized: 'Your session has expired. Sign in again and retry.',
   forbidden: 'This account is not allowed to do that.',
@@ -68,10 +69,14 @@ const MESSAGES: Record<string, string> = {
 /** A sentence for a person, from whatever went wrong. */
 export function apiErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.code !== undefined) {
+      const msg = MESSAGES[error.code];
+      if (msg !== undefined) return msg;
+    }
     if (error.status === 0) {
       return 'Could not reach the server. Check your connection and try again.';
     }
-    return MESSAGES[error.code ?? ''] ?? 'Something went wrong. Try again.';
+    return 'Something went wrong. Try again.';
   }
 
   if (error instanceof Error && error.message.length > 0) return error.message;
