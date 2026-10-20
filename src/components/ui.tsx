@@ -218,7 +218,6 @@ export function AddressChip({ value, label }: { value: string; label?: string })
     <span className="inline-flex items-center gap-1.5">
       {label === undefined ? null : <span className="text-xs text-neutral-500">{label}</span>}
       <code
-        aria-label={value}
         title={value}
         className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs dark:bg-neutral-800"
       >
