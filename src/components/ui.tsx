@@ -1,5 +1,7 @@
 import {
+  useEffect,
   useId,
+  useRef,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -200,16 +202,33 @@ export function SelectField({
 /** A short, monospaced rendering of an on-chain address with copy affordance and accessible name. */
 export function AddressChip({ value, label }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   async function copy(): Promise<void> {
     try {
       await navigator.clipboard.writeText(value);
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+      }
       setCopied(true);
-      setTimeout(() => {
+      timeoutRef.current = setTimeout(() => {
         setCopied(false);
+        timeoutRef.current = null;
       }, 2000);
     } catch {
       // Clipboard access can be withheld or unavailable in non-secure origins.
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
       setCopied(false);
     }
   }
