@@ -85,6 +85,91 @@ function url(path: string): string {
 }
 
 /**
+ * Maximum response body size buffered by the API client (1 MiB).
+ *
+ * API responses are small JSON envelopes; anything past this indicates a
+ * misconfigured proxy or unexpected response, and reading without bounds could
+ * exhaust browser memory before status or JSON validation checks run.
+ */
+export const MAX_RESPONSE_BODY_BYTES = 1_048_576; // 1 MiB
+export const MAX_RESPONSE_BYTES = MAX_RESPONSE_BODY_BYTES;
+
+/**
+ * Reads a response body as text, bounded by `MAX_RESPONSE_BODY_BYTES`.
+ *
+ * Uses a streaming reader when available to abort and cancel as soon as the
+ * limit is crossed, preventing memory exhaustion.
+ */
+async function readTextBounded(
+  response: Response,
+  maxBytes: number = MAX_RESPONSE_BODY_BYTES,
+): Promise<string> {
+  const declaredLength = response.headers.get('content-length');
+  if (declaredLength !== null) {
+    const parsedLength = parseInt(declaredLength, 10);
+    if (!Number.isNaN(parsedLength) && parsedLength > maxBytes) {
+      throw new ApiError(
+        response.status,
+        'response_too_large',
+        'The response was too large to read.',
+      );
+    }
+  }
+
+  const stream = response.body;
+  if (stream === null) return '';
+
+  if (typeof stream.getReader === 'function') {
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          totalBytes += value.byteLength;
+          if (totalBytes > maxBytes) {
+            await reader.cancel();
+            throw new ApiError(
+              response.status,
+              'response_too_large',
+              'The response was too large to read.',
+            );
+          }
+          chunks.push(value);
+        }
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        // stream may already be cancelled
+      }
+    }
+
+    if (totalBytes === 0) return '';
+    const merged = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder().decode(merged);
+  }
+
+  const text = await response.text();
+  if (new TextEncoder().encode(text).byteLength > maxBytes) {
+    throw new ApiError(
+      response.status,
+      'response_too_large',
+      'The response was too large to read.',
+    );
+  }
+  return text;
+}
+
+/**
  * Reads a response body as JSON, or `undefined` if it is not JSON.
  *
  * A 502 from a proxy is HTML, and `response.json()` on it throws a `SyntaxError`
@@ -92,7 +177,7 @@ function url(path: string): string {
  * caller report the status, which is the informative part.
  */
 async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
+  const text = await readTextBounded(response);
   if (text.length === 0) return undefined;
   try {
     return JSON.parse(text) as unknown;

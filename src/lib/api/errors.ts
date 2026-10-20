@@ -63,6 +63,7 @@ const MESSAGES: Record<string, string> = {
   invalid_nonce: 'That wallet-link request has expired. Start again.',
   invalid_signature: 'The signature did not match that wallet.',
   rate_limited: 'Too many requests. Wait a moment and try again.',
+  response_too_large: 'The response was too large to read.',
 };
 
 /** A sentence for a person, from whatever went wrong. */
