@@ -31,8 +31,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const { data } = await getSupabaseClient().auth.getSession();
-    applySession(data.session);
+    try {
+      const { data } = await getSupabaseClient().auth.getSession();
+      applySession(data.session);
+    } catch {
+      // A failure to refresh the session is handled safely to avoid unhandled
+      // rejections. Treat it as no session, settling the provider to anonymous.
+      applySession(null);
+    }
   }, [applySession]);
 
   useEffect(() => {
