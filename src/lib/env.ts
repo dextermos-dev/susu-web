@@ -31,6 +31,14 @@ export const envSchema = z.object({
   VITE_SUPABASE_ANON_KEY: z.string().min(1),
   VITE_STELLAR_NETWORK: stellarNetworkSchema,
   VITE_STELLAR_RPC_URL: z.string().url(),
+  /**
+   * Explicit opt-in for custom RPC hosts whose URL names neither testnet nor mainnet.
+   * Required to prevent an unmarked endpoint (e.g. custom mainnet) from silently
+   * signing transactions when configured for testnet.
+   */
+  VITE_STELLAR_RPC_IS_CUSTOM: z
+    .union([z.boolean(), z.enum(['true', 'false', '1', '0'])])
+    .optional(),
   VITE_FACTORY_CONTRACT_ID: contractIdSchema,
   VITE_USDC_CONTRACT_ID: contractIdSchema,
   VITE_EXPLORER_BASE_URL: z.string().url(),

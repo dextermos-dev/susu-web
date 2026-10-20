@@ -70,7 +70,9 @@ describe('Stellar client configuration and handles', () => {
     ['http://localhost:8000/soroban/rpc', true],
     ['https://rpc.example.com', false],
   ])('sets allowHttp from the RPC scheme for %s', (rpcUrl, allowHttp) => {
-    mocks.getEnv.mockReturnValue(env({ VITE_STELLAR_RPC_URL: rpcUrl }));
+    mocks.getEnv.mockReturnValue(
+      env({ VITE_STELLAR_RPC_URL: rpcUrl, VITE_STELLAR_RPC_IS_CUSTOM: 'true' }),
+    );
     client.getSorobanServer();
     expect(mocks.Server).toHaveBeenCalledExactlyOnceWith(rpcUrl, { allowHttp });
   });

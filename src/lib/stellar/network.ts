@@ -38,14 +38,31 @@ export function passphraseFor(network: StellarNetwork): string {
 }
 
 /**
- * Rejects an RPC URL that names a different network than the configured one.
+ * Options for verifying network RPC configuration.
+ */
+export interface AssertRpcMatchesNetworkOptions {
+  /**
+   * Explicit opt-in when using custom RPC endpoints whose URL does not
+   * explicitly identify the configured network.
+   */
+  readonly allowCustom?: boolean;
+}
+
+/**
+ * Rejects an RPC URL that names a different network than the configured one,
+ * or custom RPC endpoints configured without explicit opt-in.
  *
  * This catches the mistake that matters: reading or writing one chain while
- * building transactions for another. The check only looks for an explicit
- * contradiction (`testnet` in the URL while configured for `mainnet`, or the
- * reverse) so that custom RPC providers are not rejected.
+ * building transactions for another. Explicit contradictions (e.g. `mainnet` in
+ * the URL while configured for `testnet`) are refused unconditionally. Custom
+ * endpoints that do not identify the network are rejected unless `allowCustom`
+ * is explicitly granted.
  */
-export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string): void {
+export function assertRpcMatchesNetwork(
+  network: StellarNetwork,
+  rpcUrl: string,
+  options?: AssertRpcMatchesNetworkOptions | boolean,
+): void {
   if (rpcUrl.trim() === '') {
     throw new Error('Stellar RPC URL is empty.');
   }
@@ -53,6 +70,7 @@ export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string)
   const url = rpcUrl.toLowerCase();
   const mentionsTestnet = url.includes('testnet');
   const mentionsMainnet = url.includes('mainnet');
+  const isLocalHost = /^https?:\/\/(localhost|127\.0\.0\.1|\[?::1\]?)(:\d+)?(\/.*)?$/i.test(url);
 
   if (network === 'testnet' && mentionsMainnet) {
     throw new Error(
@@ -64,6 +82,16 @@ export function assertRpcMatchesNetwork(network: StellarNetwork, rpcUrl: string)
     throw new Error(
       `Stellar RPC URL points at a testnet endpoint but the configured network is "mainnet". ` +
         'Refusing to continue: transactions would be built for the wrong network.',
+    );
+  }
+
+  const allowCustom = typeof options === 'boolean' ? options : Boolean(options?.allowCustom);
+
+  if (!mentionsTestnet && !mentionsMainnet && !isLocalHost && !allowCustom) {
+    throw new Error(
+      `Stellar RPC URL names neither testnet nor mainnet, so the check cannot prove it serves ` +
+        `the configured "${network}". If this is a deliberate custom endpoint, set ` +
+        'VITE_STELLAR_RPC_IS_CUSTOM=true to opt in.',
     );
   }
 }
@@ -93,8 +121,12 @@ export function isMainnet(network: StellarNetwork): boolean {
 export function resolveNetworkConfig(env: Env): NetworkConfig {
   const network = env.VITE_STELLAR_NETWORK;
   const rpcUrl = env.VITE_STELLAR_RPC_URL;
+  const allowCustom =
+    env.VITE_STELLAR_RPC_IS_CUSTOM === true ||
+    env.VITE_STELLAR_RPC_IS_CUSTOM === 'true' ||
+    env.VITE_STELLAR_RPC_IS_CUSTOM === '1';
 
-  assertRpcMatchesNetwork(network, rpcUrl);
+  assertRpcMatchesNetwork(network, rpcUrl, { allowCustom });
 
   return {
     network,
