@@ -322,4 +322,52 @@ describe('runtime schema validation', () => {
     expect(page.items[0]?.id).toBe('test-1');
     expect(body.extraField).toBe('hello');
   });
+
+  it('rejects a wrongly-typed extra body field against bodySchema', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+        unreadCount: 'not-a-number',
+      }),
+    );
+
+    await expect(
+      apiRequestPageBody('test', {
+        bodySchema: z.object({ unreadCount: z.number() }).passthrough(),
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('rejects a missing extra body field rather than returning undefined', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+      }),
+    );
+
+    await expect(
+      apiRequestPageBody('test', {
+        bodySchema: z.object({ unreadCount: z.number() }).passthrough(),
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('passes a valid extra body through unchanged', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'test-1', count: 5 }],
+        page: { limit: 10, offset: 0, hasMore: false },
+        unreadCount: 7,
+        extraField: 'kept',
+      }),
+    );
+
+    const { body } = await apiRequestPageBody('test', {
+      bodySchema: z.object({ unreadCount: z.number() }).passthrough(),
+    });
+    expect(body.unreadCount).toBe(7);
+    expect(body.extraField).toBe('kept');
+  });
 });

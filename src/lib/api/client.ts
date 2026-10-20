@@ -57,7 +57,7 @@ export type ApiPage<T> = {
   readonly offset: number;
 };
 
-export type RequestOptions<T = unknown> = {
+export type RequestOptions<T = unknown, B = unknown> = {
   readonly method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   /** Serialised as JSON. Omitted entirely when absent. */
   readonly body?: unknown;
@@ -67,6 +67,12 @@ export type RequestOptions<T = unknown> = {
   readonly signal?: AbortSignal | undefined;
   /** Optional Zod schema to runtime-validate response payload. */
   readonly schema?: z.ZodType<T> | undefined;
+  /**
+   * Optional Zod schema for the fields alongside the page — only meaningful
+   * on `apiRequestPageBody`, where the endpoint documents extra top-level
+   * fields (like `unreadCount`) that a caller must be able to trust.
+   */
+  readonly bodySchema?: z.ZodType<B> | undefined;
 };
 
 function url(path: string): string {
@@ -268,11 +274,11 @@ export async function apiRequestPage<T>(
  * `pageOf` still validates the page, so a caller cannot be handed an `unreadCount`
  * from a response whose rows were shaped differently than expected.
  */
-export async function apiRequestPageBody<T>(
+export async function apiRequestPageBody<T, B = Record<string, unknown>>(
   path: string,
-  options: RequestOptions<T> = {},
+  options: RequestOptions<T, B> = {},
   itemSchema?: z.ZodType<T>,
-): Promise<{ page: ApiPage<T>; body: Record<string, unknown> }> {
+): Promise<{ page: ApiPage<T>; body: B }> {
   const { status, body } = await send(path, options);
 
   const page = pageOf(body);
@@ -298,5 +304,18 @@ export async function apiRequestPageBody<T>(
     items = validatedItems;
   }
 
-  return { page: { ...page, items }, body: body as Record<string, unknown> };
+  let extra = body as Record<string, unknown>;
+  if (options.bodySchema !== undefined) {
+    const parsed = options.bodySchema.safeParse(extra);
+    if (!parsed.success) {
+      throw new ApiError(
+        status,
+        undefined,
+        `The server returned an unexpected body shape: ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(', ')}`,
+      );
+    }
+    extra = parsed.data as Record<string, unknown>;
+  }
+
+  return { page: { ...page, items }, body: extra as B };
 }
